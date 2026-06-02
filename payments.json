@@ -1,0 +1,12 @@
+[
+  {
+    "payer": "anggit",
+    "receiver": "bagas",
+    "amount": 34000
+  },
+  {
+    "payer": "febrian",
+    "receiver": "bagas",
+    "amount": 34000
+  }
+]
