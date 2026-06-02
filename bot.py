@@ -28,6 +28,28 @@ PAYMENTS_FILE = Path("payments.json")
 def round_up_1000(amount):
     return math.ceil(amount / 1000) * 1000
 
+def calculate_shares(amount, payer):
+    share = round_up_1000(
+        amount / len(ROOMMATES)
+    )
+
+    shares = {
+        person: share
+        for person in ROOMMATES
+    }
+
+    total_allocated = (
+        share * len(ROOMMATES)
+    )
+
+    difference = (
+        total_allocated - amount
+    )
+
+    shares[payer] -= difference
+
+    return shares
+
 def load_json(file):
     if not file.exists():
         return []
@@ -52,7 +74,7 @@ async def start(message: Message):
         "/payments\n"
         "/balance\n"
         "/help\n"
-        "/ping"
+        "/ping\n"
         "/debts\n"
     )
 
@@ -68,7 +90,7 @@ async def help_command(message: Message):
         "/payments\n"
         "/balance\n"
         "/debts\n"
-        "/ping"
+        "/ping\n"
     )
 
 
@@ -82,6 +104,9 @@ async def add_expense(message: Message):
     try:
         parts = message.text.split(maxsplit=3)
 
+        if len(parts) != 4:
+            raise ValueError()
+
         payer = parts[1].lower()
         amount = int(parts[2])
         description = parts[3]
@@ -92,13 +117,21 @@ async def add_expense(message: Message):
             )
             return
 
+        if amount <= 0:
+            await message.answer(
+                "❌ Amount harus lebih dari 0"
+            )
+            return
+
         expenses = load_json(EXPENSES_FILE)
 
         expenses.append({
             "payer": payer,
             "amount": amount,
             "description": description,
-            "created_by": message.from_user.username
+            "created_by":
+                message.from_user.username
+                or message.from_user.full_name
         })
 
         save_json(EXPENSES_FILE, expenses)
@@ -112,9 +145,9 @@ async def add_expense(message: Message):
 
     except Exception:
         await message.answer(
-            "Usage:\n/add anggit 30000 listrik"
+            "Usage:\n"
+            "/add anggit 30000 listrik"
         )
-
 
 @dp.message(Command("history"))
 async def history(message: Message):
@@ -146,6 +179,12 @@ async def pay(message: Message):
         receiver = parts[2].lower()
         payment_input = parts[3].lower()
 
+        if payer == receiver:
+            await message.answer(
+                "❌ Tidak bisa bayar diri sendiri"
+            )
+            return
+
         if payer not in ROOMMATES:
             await message.answer(f"❌ {payer} tidak ditemukan")
             return
@@ -171,13 +210,14 @@ async def pay(message: Message):
                 expense_payer = expense["payer"]
                 amount = expense["amount"]
 
-                share = round_up_1000(
-                    amount / len(ROOMMATES)
+                shares = calculate_shares(
+                    amount,
+                    expense_payer
                 )
 
                 balances[expense_payer] += amount
 
-                for person in ROOMMATES:
+                for person, share in shares.items():
                     balances[person] -= share
 
             # Apply existing payments
@@ -245,6 +285,12 @@ async def pay(message: Message):
         else:
             amount = int(payment_input)
 
+            if amount <= 0:
+                await message.answer(
+                    "❌ Amount harus lebih dari 0"
+                )
+                return
+
             payments.append({
                 "payer": payer,
                 "receiver": receiver,
@@ -299,11 +345,14 @@ async def balance(message: Message):
         payer = expense["payer"]
         amount = expense["amount"]
 
-        share = round_up_1000(amount / len(ROOMMATES))
+        shares = calculate_shares(
+            amount,
+            expense_payer
+        )
 
-        balances[payer] += amount
+        balances[expense_payer] += amount
 
-        for person in ROOMMATES:
+        for person, share in shares.items():
             balances[person] -= share
 
     # Apply payments
@@ -331,42 +380,43 @@ async def debts(message: Message):
     expenses = load_json(EXPENSES_FILE)
     payments = load_json(PAYMENTS_FILE)
 
-    debts = []
+    debts = {}
 
     for expense in expenses:
         payer = expense["payer"]
         amount = expense["amount"]
 
-        share = round_up_1000(
-            amount / len(ROOMMATES)
+        shares = calculate_shares(
+            amount,
+            payer
         )
 
-        for person in ROOMMATES:
-            if person != payer:
-                debts.append({
-                    "debtor": person,
-                    "creditor": payer,
-                    "amount": share
-                })
+        for person, share in shares.items():
 
-    # Apply payments
+            if person == payer:
+                continue
+
+            key = (person, payer)
+
+            if key not in debts:
+                debts[key] = 0
+
+            debts[key] += share
+
     for payment in payments:
-        payer = payment["payer"]
-        receiver = payment["receiver"]
-        amount = payment["amount"]
+        key = (
+            payment["payer"],
+            payment["receiver"]
+        )
 
-        for debt in debts:
-            if (
-                debt["debtor"] == payer
-                and debt["creditor"] == receiver
-            ):
-                debt["amount"] -= amount
-                break
+        if key in debts:
+            debts[key] -= payment["amount"]
 
-    debts = [
-        d for d in debts
-        if d["amount"] > 0
-    ]
+    debts = {
+        key: amount
+        for key, amount in debts.items()
+        if amount > 0
+    }
 
     if not debts:
         await message.answer(
@@ -376,15 +426,14 @@ async def debts(message: Message):
 
     text = "💰 Settlement\n\n"
 
-    for debt in debts:
+    for (debtor, creditor), amount in debts.items():
         text += (
-            f"{debt['debtor']} → "
-            f"{debt['creditor']} "
-            f"Rp{debt['amount']:,}\n"
+            f"{debtor} → "
+            f"{creditor} "
+            f"Rp{amount:,}\n"
         )
 
     await message.answer(text)
-
 @dp.message()
 async def debug(message: Message):
     print(f"📩 {message.from_user.username}: {message.text}")
