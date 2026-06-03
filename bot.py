@@ -98,6 +98,44 @@ def calculate_settlements():
 
     return settlements
 
+def calculate_balances():
+
+    expenses = load_json(EXPENSES_FILE)
+    payments = load_json(PAYMENTS_FILE)
+
+    balances = {
+        person: 0
+        for person in ROOMMATES
+    }
+
+    # Expenses
+    for expense in expenses:
+
+        expense_payer = expense["payer"]
+        amount = expense["amount"]
+
+        shares = calculate_shares(
+            amount,
+            expense_payer
+        )
+
+        balances[expense_payer] += amount
+
+        for person, share in shares.items():
+            balances[person] -= share
+
+    # Payments
+    for payment in payments:
+
+        payer = payment["payer"]
+        receiver = payment["receiver"]
+        amount = payment["amount"]
+
+        balances[payer] += amount
+        balances[receiver] -= amount
+
+    return balances
+
 def load_json(file):
     if not file.exists():
         return []
@@ -383,39 +421,15 @@ async def payments(message: Message):
 
 @dp.message(Command("balance"))
 async def balance(message: Message):
-    expenses = load_json(EXPENSES_FILE)
-    payments = load_json(PAYMENTS_FILE)
 
-    balances = {person: 0 for person in ROOMMATES}
-
-    # Calculate expenses
-    for expense in expenses:
-        payer = expense["payer"]
-        amount = expense["amount"]
-
-        shares = calculate_shares(
-            amount,
-            expense_payer
-        )
-
-        balances[expense_payer] += amount
-
-        for person, share in shares.items():
-            balances[person] -= share
-
-    # Apply payments
-    for payment in payments:
-        payer = payment["payer"]
-        receiver = payment["receiver"]
-        amount = payment["amount"]
-
-        balances[payer] += amount
-        balances[receiver] -= amount
+    balances = calculate_balances()
 
     text = "📊 Tavern Balances\n\n"
 
     for person, balance in balances.items():
+
         sign = "+" if balance >= 0 else "-"
+
         text += (
             f"{person}: "
             f"{sign}Rp{abs(balance):,.0f}\n"
@@ -434,18 +448,16 @@ async def debts(message: Message):
     for person, balance in balances.items():
 
         if balance > 0:
-            creditors.append([
-                person,
-                round(balance)
-            ])
+            creditors.append(
+                [person, round(balance)]
+            )
 
         elif balance < 0:
-            debtors.append([
-                person,
-                round(-balance)
-            ])
+            debtors.append(
+                [person, round(-balance)]
+            )
 
-    settlements = []
+    text = "💰 Settlement\n\n"
 
     i = 0
     j = 0
@@ -457,8 +469,10 @@ async def debts(message: Message):
 
         amount = min(debt, credit)
 
-        settlements.append(
-            (debtor, creditor, amount)
+        text += (
+            f"{debtor} → "
+            f"{creditor} "
+            f"Rp{amount:,}\n"
         )
 
         debtors[i][1] -= amount
@@ -470,23 +484,7 @@ async def debts(message: Message):
         if creditors[j][1] == 0:
             j += 1
 
-    if not settlements:
-        await message.answer(
-            "🎉 Everyone is settled up."
-        )
-        return
-
-    text = "💰 Settlement\n\n"
-
-    for debtor, creditor, amount in settlements:
-        text += (
-            f"{debtor} → "
-            f"{creditor} "
-            f"Rp{amount:,}\n"
-        )
-
     await message.answer(text)
-
 @dp.message()
 async def debug(message: Message):
     print(f"📩 {message.from_user.username}: {message.text}")
