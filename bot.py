@@ -50,6 +50,54 @@ def calculate_shares(amount, payer):
 
     return shares
 
+def calculate_settlements():
+
+    balances = calculate_balances()
+
+    creditors = []
+    debtors = []
+
+    for person, balance in balances.items():
+
+        if balance > 0:
+            creditors.append([
+                person,
+                round(balance)
+            ])
+
+        elif balance < 0:
+            debtors.append([
+                person,
+                round(-balance)
+            ])
+
+    settlements = []
+
+    i = 0
+    j = 0
+
+    while i < len(debtors) and j < len(creditors):
+
+        debtor, debt = debtors[i]
+        creditor, credit = creditors[j]
+
+        amount = min(debt, credit)
+
+        settlements.append(
+            (debtor, creditor, amount)
+        )
+
+        debtors[i][1] -= amount
+        creditors[j][1] -= amount
+
+        if debtors[i][1] == 0:
+            i += 1
+
+        if creditors[j][1] == 0:
+            j += 1
+
+    return settlements
+
 def load_json(file):
     if not file.exists():
         return []
@@ -377,48 +425,52 @@ async def balance(message: Message):
 
 @dp.message(Command("debts"))
 async def debts(message: Message):
-    expenses = load_json(EXPENSES_FILE)
-    payments = load_json(PAYMENTS_FILE)
 
-    debts = {}
+    balances = calculate_balances()
 
-    for expense in expenses:
-        payer = expense["payer"]
-        amount = expense["amount"]
+    creditors = []
+    debtors = []
 
-        shares = calculate_shares(
-            amount,
-            payer
+    for person, balance in balances.items():
+
+        if balance > 0:
+            creditors.append([
+                person,
+                round(balance)
+            ])
+
+        elif balance < 0:
+            debtors.append([
+                person,
+                round(-balance)
+            ])
+
+    settlements = []
+
+    i = 0
+    j = 0
+
+    while i < len(debtors) and j < len(creditors):
+
+        debtor, debt = debtors[i]
+        creditor, credit = creditors[j]
+
+        amount = min(debt, credit)
+
+        settlements.append(
+            (debtor, creditor, amount)
         )
 
-        for person, share in shares.items():
+        debtors[i][1] -= amount
+        creditors[j][1] -= amount
 
-            if person == payer:
-                continue
+        if debtors[i][1] == 0:
+            i += 1
 
-            key = (person, payer)
+        if creditors[j][1] == 0:
+            j += 1
 
-            if key not in debts:
-                debts[key] = 0
-
-            debts[key] += share
-
-    for payment in payments:
-        key = (
-            payment["payer"],
-            payment["receiver"]
-        )
-
-        if key in debts:
-            debts[key] -= payment["amount"]
-
-    debts = {
-        key: amount
-        for key, amount in debts.items()
-        if amount > 0
-    }
-
-    if not debts:
+    if not settlements:
         await message.answer(
             "🎉 Everyone is settled up."
         )
@@ -426,7 +478,7 @@ async def debts(message: Message):
 
     text = "💰 Settlement\n\n"
 
-    for (debtor, creditor), amount in debts.items():
+    for debtor, creditor, amount in settlements:
         text += (
             f"{debtor} → "
             f"{creditor} "
@@ -434,6 +486,7 @@ async def debts(message: Message):
         )
 
     await message.answer(text)
+
 @dp.message()
 async def debug(message: Message):
     print(f"📩 {message.from_user.username}: {message.text}")
